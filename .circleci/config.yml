@@ -1,0 +1,67 @@
+version: 2.1
+
+jobs:
+  build-push-local-machine:
+    parameters:
+      image-name:
+        type: string
+        default: large_15gb
+      dockerfile:
+        type: string
+        default: images/15GB/Dockerfile
+    machine:
+      image: ubuntu-2204:2022.07.1
+    resource_class: medium
+    environment:
+      - DOCKER_REGISTRY: docker.io
+      - DOCKER_USER: kelvintaywlcircleci
+      - DOCKER_LOGIN: kelvintaywlcircleci
+    steps:
+    - checkout
+    - run:
+        name: Check Docker settings (for buildx)
+        command: |
+          docker version
+          docker buildx version
+          docker context inspect
+    - run:
+        name: Setup docker buildx
+        command: |
+          docker context create circleci
+          docker buildx create --use circleci
+
+          docker buildx ls
+          docker context inspect circleci
+    - run:
+        name: Login to registry
+        command: |
+          # login credentials should be provided via context or project environment variables.
+          echo $DOCKER_PASSWORD | docker login $DOCKER_REGISTRY --username $DOCKER_LOGIN --password-stdin
+    - restore_cache:
+        keys:
+          - buildx-local-cache-machine-{{ arch }}-{{ .Branch }}-
+          - buildx-local-cache-machine-{{ arch }}-
+    - run:
+        name: Docker buildx with local cache
+        command: |
+          docker buildx build --progress=plain \
+            --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
+            --cache-to=type=local,mode=max,dest=/tmp/dockercache \
+            --cache-from=type=local,src=/tmp/dockercache \
+            --output=type=docker \
+            .
+
+          docker image ls
+    - save_cache:
+        key: buildx-local-cache-machine-{{ arch }}-{{ .Branch }}-{{ checksum "/tmp/dockercache/index.json" }}
+        paths:
+          - /tmp/dockercache
+    - run:
+        name: Publish image
+        command: |
+          docker image push "${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}"
+
+workflows:
+  main:
+    jobs:
+      - build-push-local-machine
