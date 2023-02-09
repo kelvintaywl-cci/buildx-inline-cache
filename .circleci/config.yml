@@ -44,12 +44,21 @@ jobs:
     - run:
         name: Docker buildx with local cache
         command: |
-          docker buildx build --progress=plain \
-            --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
-            --cache-to=type=local,mode=max,dest=/tmp/dockercache \
-            --cache-from=type=local,src=/tmp/dockercache \
-            --output=type=docker \
-            .
+          if [ -f "/tmp/dockercache/index.json" ]; then
+            docker buildx build --progress=plain \
+              --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
+              --cache-to=type=local,mode=max,dest=/tmp/dockercache \
+              --cache-from=type=local,src=/tmp/dockercache \
+              --output=type=docker \
+              .
+          else
+            # no cache to load from;
+            docker buildx build --progress=plain \
+              --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
+              --cache-to=type=local,mode=max,dest=/tmp/dockercache \
+              --output=type=docker \
+              .
+          fi
 
           docker image ls
     - save_cache:
