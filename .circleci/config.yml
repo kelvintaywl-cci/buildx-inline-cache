@@ -5,10 +5,10 @@ jobs:
     parameters:
       image-name:
         type: string
-        default: large_15gb
+        default: large_6gb
       dockerfile:
         type: string
-        default: images/15GB/Dockerfile
+        default: images/6GB/Dockerfile
     machine:
       image: ubuntu-2204:2022.07.1
     resource_class: medium
