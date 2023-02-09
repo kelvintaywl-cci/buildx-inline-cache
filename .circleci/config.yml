@@ -1,5 +1,10 @@
 version: 2.1
 
+executors:
+  ubuntu2204:
+     machine:
+      image: ubuntu-2204:2022.07.1
+
 jobs:
   build-push-local-machine:
     parameters:
@@ -9,70 +14,96 @@ jobs:
       dockerfile:
         type: string
         default: images/6GB/Dockerfile
-    machine:
-      image: ubuntu-2204:2022.07.1
+    executor: ubuntu2204
     resource_class: medium
     environment:
       - DOCKER_REGISTRY: docker.io
       - DOCKER_USER: kelvintaywlcircleci
       - DOCKER_LOGIN: kelvintaywlcircleci
     steps:
-    - checkout
-    - run:
-        name: Check Docker settings (for buildx)
-        command: |
-          docker version
-          docker buildx version
-          docker context inspect
-    - run:
-        name: Setup docker buildx
-        command: |
-          docker context create circleci
-          docker buildx create --use circleci
+      - checkout
+      - run:
+          name: Check Docker settings (for buildx)
+          command: |
+            docker version
+            docker buildx version
+            docker context inspect
+      - run:
+          name: Setup docker buildx
+          command: |
+            docker context create circleci
+            docker buildx create --use circleci
 
-          docker buildx ls
-          docker context inspect circleci
-    - run:
-        name: Login to registry
-        command: |
-          # login credentials should be provided via context or project environment variables.
-          echo $DOCKER_PASSWORD | docker login $DOCKER_REGISTRY --username $DOCKER_LOGIN --password-stdin
-    - restore_cache:
-        keys:
-          - buildx-local-cache-machine-{{ arch }}-{{ .Branch }}-
-          - buildx-local-cache-machine-{{ arch }}-
-    - run:
-        name: Docker buildx with local cache
-        command: |
-          if [ -f "/tmp/dockercache/index.json" ]; then
-            docker buildx build --progress=plain \
-              --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
-              --cache-to=type=local,mode=max,dest=/tmp/dockercache \
-              --cache-from=type=local,src=/tmp/dockercache \
-              --file << parameters.dockerfile >> \
-              --output=type=docker \
-              .
-          else
-            # no cache to load from;
-            docker buildx build --progress=plain \
-              --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
-              --cache-to=type=local,mode=max,dest=/tmp/dockercache \
-              --file << parameters.dockerfile >> \
-              --output=type=docker \
-              .
-          fi
+            docker buildx ls
+            docker context inspect circleci
+      - run:
+          name: Login to registry
+          command: |
+            # login credentials should be provided via context or project environment variables.
+            echo $DOCKER_PASSWORD | docker login $DOCKER_REGISTRY --username $DOCKER_LOGIN --password-stdin
+      - restore_cache:
+          keys:
+            - buildx-local-cache-machine-{{ arch }}-{{ .Branch }}-
+            - buildx-local-cache-machine-{{ arch }}-
+      - run:
+          name: Docker buildx with local cache
+          command: |
+            if [ -f "/tmp/dockercache/index.json" ]; then
+              docker buildx build --progress=plain \
+                --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
+                --cache-to=type=local,mode=max,dest=/tmp/dockercache \
+                --cache-from=type=local,src=/tmp/dockercache \
+                --file << parameters.dockerfile >> \
+                --output=type=docker \
+                .
+            else
+              # no cache to load from;
+              docker buildx build --progress=plain \
+                --tag="${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}" \
+                --cache-to=type=local,mode=max,dest=/tmp/dockercache \
+                --file << parameters.dockerfile >> \
+                --output=type=docker \
+                .
+            fi
 
-          docker image ls
-    - save_cache:
-        key: buildx-local-cache-machine-{{ arch }}-{{ .Branch }}-{{ checksum "/tmp/dockercache/index.json" }}
-        paths:
-          - /tmp/dockercache
-    - run:
-        name: Publish image
-        command: |
-          docker image push "${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}"
+            docker image ls
+      - save_cache:
+          key: buildx-local-cache-machine-{{ arch }}-{{ .Branch }}-{{ checksum "/tmp/dockercache/index.json" }}
+          paths:
+            - /tmp/dockercache
+      - run:
+          name: Publish image
+          command: |
+            docker image push "${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}"
+      - run:
+          name: Save image as tar
+          command: |
+            mkdir -p images
+            docker image save -o "images/<< parameters.image-name >>:${CIRCLE_SHA1}" "${DOCKER_REGISTRY}/${DOCKER_USER}/<< parameters.image-name >>:${CIRCLE_SHA1}"
+      - persist_to_workspace:
+          root: .
+          paths:
+            - images
+  test-pushed-image:
+    parameters:
+      image-name:
+        type: string
+        default: large_6gb
+    executor: ubuntu2204
+    resource_class: medium
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Load image
+          command: |
+            docker image load < "images/<< parameters.image-name >>:${CIRCLE_SHA1}"
+      - run: docker image ls
 
 workflows:
   main:
     jobs:
       - build-push-local-machine
+      - test-pushed-image:
+          requires:
+            - build-push-local-machine
